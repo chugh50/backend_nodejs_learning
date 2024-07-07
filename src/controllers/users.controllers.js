@@ -1,7 +1,7 @@
 import { ApiError } from "../utils/apierrors.js";
 import { asyncHandler } from "../utils/asynchandler.js";
 import { User } from "../models/user.models.js";
-
+import { Subscription } from "../models/subscription.models.js";
 import { uploadFileOnCloudinary } from "../utils/cloudinary.js";
 
 import { ApiResponse } from "../utils/apiresponse.js";
@@ -194,13 +194,223 @@ const refreshAccessToken = asyncHandler(async (req,res) => {
 
 })
 
-// const updatePassword = asyncHandler( async (req,res) =>{
-//     const {oldPassword,newPassword} = req.body;
-//     const user =  await User.findById(req.user?._id);
-//     user.
+const updatePassword = asyncHandler( async (req,res) =>{
+    const {oldPassword,newPassword} = req.body;
+    const user =  await User.findById(req.user?._id);
+    isPasswordCorrect  = await user.isCorrectPassword(isCorrectPassword);
+    if(!isPasswordCorrect){
+        throw new ApiError(400,"Incorrect Password")
+    }
+    user.password = newPassword;
+    await user.save({validateBeforeSave:false});
+    res
+    .status(200)
+    .json(
+        new ApiResponse(
+            200,
+            {},
+            "Password Updated Successfully"
+        )
+    )
+})
+
+const updateAccountDetails = asyncHandler(async(req,res) => {
+    const {fullName,email} = req.body;
+
+    if(!fullName || !email){
+        throw new ApiError(400,"All fields are required");
+    }
+    const user  = User.findByIdAndUpdate(req.user._id,
+                                         {
+                                            $set:{
+                                                fullName:fullName,
+                                                email:email
+                                            }
+                                         },
+                                         {
+                                            new:true
+                                         }   
+                                        ).select("-password");
+    return res
+            .status(200)
+            .json(
+                new ApiResponse(
+                    200,
+                    user,
+                    "Details Updated Successfully"
+                )
+            )                                     
+})  
+
+
+const getCurrentUserDetails = asyncHandler( async (req,res) =>{
     
-// })
+    return res
+            .status(200)
+            .json(
+                new ApiResponse(
+                    200,
+                    req.user,
+                    "Send user details"
+                )
+            )
+})
+
+
+const changeAvatar = asyncHandler(async(req,res) => {
+    const { avatarLocalPath } = req.file?.avatar;
+    if(!avatarLocalPath ){
+        throw new ApiError(400,"Avatar file is required");
+    }
+
+    const avatar  =   uploadFileOnCloudinary(avatarLocalPath);
+    if(!avatar.url){
+        throw new ApiError(400,"Avatar url is missing");
+    }
 
 
 
-export {registerUser,loginUsers,logOutUsers,refreshAccessToken};
+
+    const user = await User.findByIdAndUpdate(
+        req.user._id,
+        {
+            $set:{
+                avatar: avatar.url
+            }
+        },
+        {new:true}
+        ).select("-password");
+        
+        return  res
+                .status(200)
+                .json(
+                    new ApiResponse(200, user, "Avatar image updated successfully")
+                     )
+
+})
+
+const changeCoverImage = asyncHandler(async(req,res) => {
+    const {coverImageLocalPath } = req.file?.avatar;
+    if(!coverImageLocalPath ){
+        throw new ApiError(400,"Avatar file is required");
+    }
+
+    const coverImage  =   uploadFileOnCloudinary(coverImageLocalPath);
+    if(!coverImage.url){
+        throw new ApiError(400,"Avatar url is missing");
+    }
+
+
+
+
+    const user = await User.findByIdAndUpdate(
+        req.user._id,
+        {
+            $set:{
+                coverImage: coverImage.url
+            }
+        },
+        {new:true}
+        ).select("-password");
+        
+        return  res
+                .status(200)
+                .json(
+                    new ApiResponse(200, user, "Avatar image updated successfully")
+                     )
+
+})
+
+
+const userChannelDetails = asyncHandler(async (req,res) =>{
+    const { username } = req.params;
+    if(!username?.trim()){
+        throw new ApiError(400,"username is not correct");
+    }
+
+    const channel = await User.aggregate(
+        [
+            {
+                $match:{
+                    username:username?.toLowerCase()
+                }
+            },
+            {
+                $lookup:{
+                    from:"subscriptions",
+                    localField:"_id",
+                    foreignField:"channel",
+                    result:"subscribers"
+
+                }
+            },
+            {
+                $lookup:{
+                    from:"subscriptions",
+                    localField:"_id",
+                    foreignField:"subscriber",
+                    result:"subscribertobe"
+
+                }
+            },
+            {
+                $addFields:{
+                    subscribersCount:{
+                        $size:"$subscribers"
+                    },
+                    subscriberToBeCount:{
+                        $size:"$subscriberstobe"
+                    },
+                    isSubscribed:{
+                        if:{$in:[req.user?._id,"$subscribers.subscriber"]},
+                        then: true,
+                        else:false
+                    }
+
+                }
+            },
+            {
+                $project:{
+                    email:1,
+                    username:1,
+                    fullName:1,
+                    avatar:1,
+                    coverImage:1,
+                    subscribersCount:1,
+                    subscriberToBeCount : 1                    
+
+                }
+            }
+        ]
+    )
+
+    if(!channel?.length){
+        throw new ApiError(400,"channel doesnot exist");
+    }
+
+    return res
+            .status(200)
+            .json(
+                new ApiResponse(
+                    200,
+                    channel[0],
+                    "User Channel fetch successfully"
+                )
+            )
+
+})
+
+
+
+
+export {registerUser
+    ,loginUsers
+    ,logOutUsers
+    ,refreshAccessToken
+    ,updatePassword
+    ,getCurrentUserDetails
+    ,changeAvatar
+    ,changeCoverImage
+    ,updateAccountDetails
+    ,userChannelDetails
+};
